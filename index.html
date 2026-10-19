@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LİDRAZE OTP - API Görüntüleyici</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #1a1a1a; color: #eee; padding: 20px; }
+        h1 { color: #4CAF50; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #333; padding: 8px; text-align: left; font-size: 14px; }
+        th { background: #2a2a2a; color: #4CAF50; }
+        tr:nth-child(even) { background: #222; }
+        .source { color: #888; font-size: 12px; }
+        .otp { color: #ff9800; font-weight: bold; }
+        #status { margin: 10px 0; padding: 10px; background: #2a2a2a; border-radius: 4px; }
+        .error { color: #f44336; }
+        .ok { color: #4CAF50; }
+        button { padding: 10px 20px; background: #4CAF50; color: white; border: none; cursor: pointer; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>📡 LİDRAZE OTP - API Görüntüleyici</h1>
+    <div id="status">Yükleniyor...</div>
+    <button onclick="loadData()">🔄 Yenile</button>
+    
+    <table id="otpTable">
+        <thead>
+            <tr>
+                <th>Platform</th>
+                <th>Numara</th>
+                <th>Kod</th>
+                <th>Mesaj</th>
+                <th>Zaman</th>
+                <th>Kaynak</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+    </table>
+
+    <script>
+        // ⚠️ CORS NEDENİYLE BU API'LER TARAYICIDA ÇALIŞMAYABİLİR
+        // Çalışması için bir proxy gerekir.
+        const APIS = [
+            { name: "container", url: "http://194.238.28.236:8000/container" },
+            { name: "client", url: "http://62.169.28.71/client.php?token=pbqDNx2Mt1Q2ggnrvBz2tEM-aSsx099a&limit=100" },
+            { name: "viewstats", url: "http://147.135.212.197/crapi/st/viewstats?token=RVdWRElBUzRGcW9WeneNcmd2cGV9ZJd8e29PVlyPcFxeamxSgWVXfw==&records=200" },
+            { name: "xeron_console", url: "http://xeron.network:8080/XRSDDD5366/@public/api/console" },
+            { name: "xeron_otp", url: "http://xeron.network:8080/XRSDDD5366/@public/api/success-otp" }
+        ];
+
+        let seenKeys = new Set(); // Aynı kod tekrar etmesin (tarayıcı hafızası)
+
+        function extractOtp(sms) {
+            if (!sms) return "";
+            const patterns = [/\b(\d{3}[-\s]\d{3})\b/, /\b(\d{6,8})\b/, /\b(\d{4,5})\b/];
+            for (const p of patterns) {
+                const m = sms.match(p);
+                if (m) return m[1].replace(/[\s-]/g, "");
+            }
+            return "";
+        }
+
+        function normalizeNumber(n) {
+            return String(n || "").replace(/\D/g, "");
+        }
+
+        function parseEntry(entry, source) {
+            // Format 1: ViewStats list-of-list
+            if (Array.isArray(entry) && entry.length >= 4 && !Array.isArray(entry[0])) {
+                const num = normalizeNumber(entry[1]);
+                if (num.length < 7) return null;
+                return {
+                    platform: entry[0] || "",
+                    number: num,
+                    otp: extractOtp(entry[2]),
+                    message: (entry[2] || "").substring(0, 100),
+                    time: entry[3] || "",
+                    source: source,
+                    masked: false
+                };
+            }
+            // Format 2: Xeron
+            if (entry && entry.message && entry.range) {
+                return {
+                    platform: entry.sid || "",
+                    number: normalizeNumber(entry.range),
+                    otp: extractOtp(entry.message),
+                    message: (entry.message || "").substring(0, 100),
+                    time: entry.time ? new Date(entry.time).toLocaleString() : "",
+                    source: source,
+                    masked: true
+                };
+            }
+            // Format 3: Container/Client
+            if (entry && (entry.numara || entry.number || entry.phone)) {
+                const num = normalizeNumber(entry.numara || entry.number || entry.phone);
+                if (!num) return null;
+                return {
+                    platform: entry.platform || entry.service || "",
+                    number: num,
+                    otp: entry.otp || entry.code || extractOtp(entry.sms || entry.message),
+                    message: (entry.sms || entry.message || "").substring(0, 100),
+                    time: entry.zaman || entry.time || "",
+                    source: source,
+                    masked: false
+                };
+            }
+            return null;
+        }
+
+        async function fetchApi(api) {
+            try {
+                const res = await fetch(api.url, { headers: { "Accept": "application/json" } });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                
+                let items = [];
+                if (Array.isArray(data)) {
+                    items = data;
+                } else if (data && data.data) {
+                    if (Array.isArray(data.data)) items = data.data;
+                    else if (data.data.hits) items = data.data.hits;
+                }
+                
+                const parsed = [];
+                for (const entry of items) {
+                    const p = parseEntry(entry, api.name);
+                    if (p && p.otp && p.number) {
+                        const key = p.number + "_" + p.otp;
+                        if (!seenKeys.has(key)) {
+                            seenKeys.add(key);
+                            parsed.push(p);
+                        }
+                    }
+                }
+                return parsed;
+            } catch (e) {
+                console.error(`${api.name} hata:`, e);
+                return [];
+            }
+        }
+
+        async function loadData() {
+            const statusEl = document.getElementById("status");
+            const tbody = document.getElementById("tableBody");
+            
+            statusEl.textContent = "🔄 Tüm API'ler taranıyor...";
+            statusEl.className = "";
+            tbody.innerHTML = "";
+            
+            const results = await Promise.all(APIS.map(api => fetchApi(api)));
+            const allData = results.flat();
+            
+            // Tarihe göre sırala
+            allData.sort((a, b) => String(b.time).localeCompare(String(a.time)));
+            
+            if (allData.length === 0) {
+                statusEl.textContent = "❌ Hiç veri gelmedi. (CORS hatası olabilir - konsolu kontrol et)";
+                statusEl.className = "error";
+                return;
+            }
+            
+            statusEl.textContent = `✅ ${allData.length} yeni kayıt gösteriliyor`;
+            statusEl.className = "ok";
+            
+            for (const item of allData) {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td>${item.platform}</td>
+                    <td><code>+${item.number}</code></td>
+                    <td class="otp">${item.otp || "-"}</td>
+                    <td>${item.message || "-"}</td>
+                    <td>${item.time || "-"}</td>
+                    <td class="source">${item.source}${item.masked ? " (maskeli)" : ""}</td>
+                `;
+                tbody.appendChild(tr);
+            }
+        }
+
+        // İlk yükleme
+        loadData();
+    </script>
+</body>
+</html>
