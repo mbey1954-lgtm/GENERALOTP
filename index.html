@@ -39,17 +39,14 @@
     </table>
 
     <script>
-        // ⚠️ CORS NEDENİYLE BU API'LER TARAYICIDA ÇALIŞMAYABİLİR
-        // Çalışması için bir proxy gerekir.
+        // ✅ 3 API (Container ve Xeron OTP kaldırıldı)
         const APIS = [
-            { name: "container", url: "http://194.238.28.236:8000/container" },
             { name: "client", url: "http://62.169.28.71/client.php?token=pbqDNx2Mt1Q2ggnrvBz2tEM-aSsx099a&limit=100" },
             { name: "viewstats", url: "http://147.135.212.197/crapi/st/viewstats?token=RVdWRElBUzRGcW9WeneNcmd2cGV9ZJd8e29PVlyPcFxeamxSgWVXfw==&records=200" },
-            { name: "xeron_console", url: "http://xeron.network:8080/XRSDDD5366/@public/api/console" },
-            { name: "xeron_otp", url: "http://xeron.network:8080/XRSDDD5366/@public/api/success-otp" }
+            { name: "xeron_console", url: "http://xeron.network:8080/XRSDDD5366/@public/api/console" }
         ];
 
-        let seenKeys = new Set(); // Aynı kod tekrar etmesin (tarayıcı hafızası)
+        let seenKeys = new Set();
 
         function extractOtp(sms) {
             if (!sms) return "";
@@ -92,7 +89,7 @@
                     masked: true
                 };
             }
-            // Format 3: Container/Client
+            // Format 3: Client dict
             if (entry && (entry.numara || entry.number || entry.phone)) {
                 const num = normalizeNumber(entry.numara || entry.number || entry.phone);
                 if (!num) return null;
@@ -145,23 +142,22 @@
             const statusEl = document.getElementById("status");
             const tbody = document.getElementById("tableBody");
             
-            statusEl.textContent = "🔄 Tüm API'ler taranıyor...";
+            statusEl.textContent = "🔄 3 API taranıyor...";
             statusEl.className = "";
             tbody.innerHTML = "";
             
             const results = await Promise.all(APIS.map(api => fetchApi(api)));
             const allData = results.flat();
             
-            // Tarihe göre sırala
             allData.sort((a, b) => String(b.time).localeCompare(String(a.time)));
             
             if (allData.length === 0) {
-                statusEl.textContent = "❌ Hiç veri gelmedi. (CORS hatası olabilir - konsolu kontrol et)";
+                statusEl.textContent = "❌ Hiç veri gelmedi. (CORS hatası olabilir - tarayıcı konsolunu kontrol et)";
                 statusEl.className = "error";
                 return;
             }
             
-            statusEl.textContent = `✅ ${allData.length} yeni kayıt gösteriliyor`;
+            statusEl.textContent = `✅ ${allData.length} yeni kayıt gösteriliyor (3 API)`;
             statusEl.className = "ok";
             
             for (const item of allData) {
@@ -178,7 +174,6 @@
             }
         }
 
-        // İlk yükleme
         loadData();
     </script>
 </body>
